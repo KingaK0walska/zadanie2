@@ -13,6 +13,9 @@ COPY server.js ./
 # 2. Etap - uruchomienie aplikacji
 FROM node:20-alpine
 
+# Wymuszenie aktualizacji npm do najnowszej wersji, aby załatać wbudowane podatności
+RUN npm install -g npm@latest
+
 # OCI 
 LABEL org.opencontainers.image.authors="Kinga Kowalska"
 LABEL org.opencontainers.image.title="Aplikacja Pogodowa"
