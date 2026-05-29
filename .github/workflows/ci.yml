@@ -1,0 +1,84 @@
+name: Zadanie 2
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-test-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Pobranie kodu źródłowego z repozytorium
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # 2. Logowanie do Docker Hub - cache
+      - name: Login to DockerHub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 3. Logowanie do ghcr.io
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 4. Automatyczne generowanie tagów 
+      - name: Docker metadata definitions
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/zadanie2-obraz
+          flavor: latest=false
+          tags: |
+            type=sha,priority=100,prefix=sha-,format=short
+            type=semver,priority=200,pattern={{version}}
+
+      # 5. Ustawienie QEMU i Buildx dla Multi-Arch
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 6. Budowa lokalnego obrazu do skanowania CVE (tylko amd64) 
+      - name: Build local image for CVE scanning
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: local-test-image:latest
+          cache-from: type=registry,ref=${{ vars.DOCKERHUB_USERNAME }}/zadanie2-cache:cache
+
+      # 7. Skanowanie obrazu za pomocą Trivy 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'local-test-image:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # 8. Budowa Multi-Arch i wysyłka do ghcr.io (tylko gdy skan przejdzie - nie będzie błędów CRiTICAL/HIGH)
+      - name: Build and push Multi-Arch Image to GHCR
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ vars.DOCKERHUB_USERNAME }}/zadanie2-cache:cache
+          cache-to: type=registry,ref=${{ vars.DOCKERHUB_USERNAME }}/zadanie2-cache:cache,mode=max
